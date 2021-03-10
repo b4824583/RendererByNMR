@@ -24,13 +24,17 @@ class Model(nn.Module):
     def __init__(self, filename_obj, filename_ref):
         super(Model, self).__init__()
         vertices, faces = nr.load_obj(filename_obj)
-
+        # print(faces[-1])
+        # exit()
         ##--------------------------
         # print(vertices)
-        delta_v_read=open("delta_v.txt","r")
+
         #############
         # delta v
+        #目前先嘗試把delta v 拿掉，原因是，blender產生出來的vertices順序會打亂。
+        delta_v_read = open("bird3_delta_v.txt", "r")
         for i in range(len(vertices)):
+            # continue
             vector=delta_v_read.readline().split()
             vertices[i][0]=vertices[i][0]+float(vector[0])
             vertices[i][1]=vertices[i][1]+float(vector[1])
@@ -38,8 +42,12 @@ class Model(nn.Module):
         # print(vertices.shape)
         ############
         ###########
-        #scale
+
+        #scale original is 0.4
+        # 有一度把scale 拿掉，因為blender產生的vertices與原本mesh npy檔案的不一樣
         vertices=vertices*0.4
+
+
         ##########
         ##########
         #rotataion
@@ -80,11 +88,11 @@ class Model(nn.Module):
         # create textures
         # texture size=1的時候每個三角形都各自有一個顏色
         #texture size=2的時候就很神奇了，三角形像是有內插的顏色一樣，這一點我不太理解
-        texture_size = 2
-        textures = torch.rand(1, self.faces.shape[1], texture_size, texture_size, texture_size, 3, dtype=torch.float32)
+        texture_size = 4
+        textures = torch.zeros(1, self.faces.shape[1], texture_size, texture_size, texture_size, 3, dtype=torch.float32)
         self.textures = nn.Parameter(textures)
         #silhouette-----------------------
-        mask = open("mask.txt", "r")
+        mask = open("bird3_mask.txt", "r")
         filename_ref_data=imread(filename_ref)
         # filename_ref_data_silhouette=filename_ref_data
         for i in range(256):
@@ -92,13 +100,12 @@ class Model(nn.Module):
             for j in range(256):
                 # break
                 filename_ref_data[i][j]=filename_ref_data[i][j]*float(mask_element[j])
-
-        # imshow(filename_ref_data_silhouette)
+        imshow(filename_ref_data)
+        imsave('data/birdie3_silhouette.png', img_as_ubyte(filename_ref_data))
         # plt.show()
         # exit()
-        # mask_element[i]=mask.readline.split
         image_ref = torch.from_numpy(filename_ref_data.astype('float32') / 255.).permute(2,0,1)[None, ::]
-        image_ref_2=imread("birdie2_swap.png")
+        image_ref_2=imread("birdie2_silhouette_switch.png")
 
         image_ref_2=torch.from_numpy(image_ref_2.astype('float32')/255.).permute(2,0,1)[None, ::]
         self.register_buffer('image_ref', image_ref)
@@ -138,6 +145,48 @@ def make_gif(filename):
             writer.append_data(imageio.imread(filename))
             os.remove(filename)
     writer.close()
+def load_obj_get_texture_vertices_and_face(filename_obj, normalization=True, texture_size=4, load_texture=False,
+             texture_wrapping='REPEAT', use_bilinear=True):
+    """
+    Load Wavefront .obj file.
+    This function only supports vertices (v x x x) and faces (f x x x).
+    """
+
+    # load vertices
+    vertices = []
+    with open(filename_obj) as f:
+        lines = f.readlines()
+
+    for line in lines:
+        if len(line.split()) == 0:
+            continue
+        if line.split()[0] == 'vt':
+            vertices.append([float(v) for v in line.split()[1:4]])
+
+    # print(len(vertices[0]))
+    for i in range(len(vertices)):
+        vertices[i].append(0.0)
+    # print(len(vertices[0]))
+    vertices = torch.from_numpy(np.vstack(vertices).astype(np.float32)).cuda()
+
+    # load faces
+    faces = []
+    for line in lines:
+        if len(line.split()) == 0:
+            continue
+        if line.split()[0] == 'f':
+            vs = line.split()[1:]
+            nv = len(vs)
+            v0 = int(vs[0].split('/')[1])
+            for i in range(nv - 2):
+                v1 = int(vs[i + 1].split('/')[1])
+                v2 = int(vs[i + 2].split('/')[1])
+                faces.append((v0, v1, v2))
+    faces = torch.from_numpy(np.vstack(faces).astype(np.int32)).cuda() - 1
+
+    # print(faces[0])
+    return vertices, faces
+
 
 
 def main():
@@ -151,12 +200,10 @@ def main():
     args = parser.parse_args()
 
     model = Model(args.filename_obj, args.filename_ref)
-    # cos1=math.cos(math.pi)
-    # print(model.)
     model.cuda()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=0.1, betas=(0.5,0.999))
-    loop = tqdm.tqdm(range(1))
+    loop = tqdm.tqdm(range(300))
     for _ in loop:
         loop.set_description('Optimizing')
         optimizer.zero_grad()
@@ -167,17 +214,71 @@ def main():
     # draw object
     # loop = tqdm.tqdm(range(0, 360, 4))
     model.renderer.eye = nr.get_points_from_angles(2.732, 180, 0)
-    # model.textures=torch.rand(1,555,6,6,6,3,dtype=torch.float32)
 
     images, _, _ = model.renderer(model.vertices, model.faces, torch.tanh(model.textures))
     image = images.detach().cpu().numpy()[0].transpose((1, 2, 0))
     imsave('data/outputs.png', img_as_ubyte(image))
+
+    #---------------------------test for read texture
+    texture_vertices,texture_faces=load_obj_get_texture_vertices_and_face(args.filename_obj)
+    texture_vertices=texture_vertices[None, :, :]
+    texture_faces=texture_faces[None, :, :]
+    for i in range(len(texture_vertices[0])):
+        texture_vertices[0][i][0]*=2
+        texture_vertices[0][i][1]*=2
+
+    for i in range(len(texture_vertices[0])):
+        texture_vertices[0][i][0]-=1
+        texture_vertices[0][i][1]-=1
+
+    # texture_vertices=texture_vertices*1.5
+    # temp_x=0.0
+    # temp_y=0.0
+    # min_x=1.0
+    # min_y=1.0
+    #
+    # print(texture_vertices.size())
+    # for i in range(len(texture_vertices[0])):
+    #     if(temp_x<texture_vertices[0][i][0]):
+    #         temp_x=texture_vertices[0][i][0]
+    #     if(temp_y<texture_vertices[0][i][1]):
+    #         temp_y=texture_vertices[0][i][1]
+    #     if(min_x>texture_vertices[0][i][0]):
+    #         min_x=texture_vertices[0][i][0]
+    #     if(min_y>texture_vertices[0][i][1]):
+    #         min_y=texture_vertices[0][i][1]
+    # print(temp_x)
+    # print(temp_y)
+    # print(min_x)
+    # print(min_y)
+    # exit()
+    model.renderer.eye = nr.get_points_from_angles(2.732, 0, 0)
+    images, _, _ = model.renderer(texture_vertices, texture_faces, torch.tanh(model.textures))
+    image = images.detach().cpu().numpy()[0].transpose((1, 2, 0))
+    #-----test white texture png
+    #-----
+    # for i in range(len(image)):
+    #     for j in range(len(image[i])):
+    #         if(image[i][j][0]==0.0 and image[i][j][1]==0.0 and image[i][j][2]==0.0):
+    #             image[i][j][0]=1.0
+    #             image[i][j][1]=1.0
+    #             image[i][j][2]=1.0
+    # exit()
+    imsave('data/texture.png', img_as_ubyte(image))
+    imshow(img_as_ubyte(image))
+    plt.show()
+
     # exit()
     for num, azimuth in enumerate(loop):
         loop.set_description('Drawing')
         model.renderer.eye = nr.get_points_from_angles(2.732, 0, azimuth)
+
         # model.textures = torch.zeros(1, self.faces.shape[1], texture_size, texture_size, texture_size, 3, dtype=torch.float32)
         # model.textures=torch.rand(1,555,6,6,6,3,dtype=torch.float32)
+        # textures = torch.zeros(1, 555, 4, 4, 4, 3, dtype=torch.float32)
+        # model.textures = nn.Parameter(textures)
+
+
 
         images, _, _ = model.renderer(model.vertices, model.faces, torch.tanh(model.textures))
         image = images.detach().cpu().numpy()[0].transpose((1, 2, 0))
