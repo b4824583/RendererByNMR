@@ -21,7 +21,7 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 data_dir = os.path.join(current_dir, 'data')
 
 class Model(nn.Module):
-    def __init__(self, filename_obj, filename_ref):
+    def __init__(self, filename_obj, filename_ref,useSilhouette=False,useDeltaAndScale=True):
         super(Model, self).__init__()
         vertices, faces = nr.load_obj(filename_obj)
         # print(faces[-1])
@@ -32,22 +32,29 @@ class Model(nn.Module):
         #############
         # delta v
         #目前先嘗試把delta v 拿掉，原因是，blender產生出來的vertices順序會打亂。
-        delta_v_read = open("bird3_delta_v.txt", "r")
+
+        if useDeltaAndScale:
+            delta_v_read = open("bird1_delta_v.txt", "r")
+            for i in range(len(vertices)):
+                # continue
+                vector=delta_v_read.readline().split()
+                vertices[i][0]=vertices[i][0]+float(vector[0])
+                vertices[i][1]=vertices[i][1]+float(vector[1])
+                vertices[i][2]=vertices[i][2]+float(vector[2])
+            # print(vertices.shape)
+            ############
+            ###########
+
+            #scale original is 0.4
+            # 有一度把scale 拿掉，因為blender產生的vertices與原本mesh npy檔案的不一樣
+            vertices=vertices*0.4
+        #write new vertices
+        f=open("deformBird.obj","w")
+        f.write("mtllib spot_triangulated.mtl\n")
+        f.write("o BirdReOrined_UnwrapBlender\n")
         for i in range(len(vertices)):
-            # continue
-            vector=delta_v_read.readline().split()
-            vertices[i][0]=vertices[i][0]+float(vector[0])
-            vertices[i][1]=vertices[i][1]+float(vector[1])
-            vertices[i][2]=vertices[i][2]+float(vector[2])
-        # print(vertices.shape)
-        ############
-        ###########
-
-        #scale original is 0.4
-        # 有一度把scale 拿掉，因為blender產生的vertices與原本mesh npy檔案的不一樣
-        vertices=vertices*0.4
-
-
+            f.write("v "+str(vertices[i][0].detach().cpu().numpy())+" "+str(vertices[i][1].detach().cpu().numpy())+" "+str(vertices[i][2].detach().cpu().numpy())+"\n")
+        f.close()
         ##########
         ##########
         #rotataion
@@ -92,24 +99,26 @@ class Model(nn.Module):
         textures = torch.zeros(1, self.faces.shape[1], texture_size, texture_size, texture_size, 3, dtype=torch.float32)
         self.textures = nn.Parameter(textures)
         #silhouette-----------------------
-        mask = open("bird3_mask.txt", "r")
+        mask = open("bird1_mask.txt", "r")
         filename_ref_data=imread(filename_ref)
-        # filename_ref_data_silhouette=filename_ref_data
-        for i in range(256):
-            mask_element = mask.readline().split()
-            for j in range(256):
-                # break
-                filename_ref_data[i][j]=filename_ref_data[i][j]*float(mask_element[j])
-        imshow(filename_ref_data)
-        imsave('data/birdie3_silhouette.png', img_as_ubyte(filename_ref_data))
-        # plt.show()
-        # exit()
+        #---------------------這邊的問題是強置只能讀取256*256的圖片來製作前景去被
+        # print(mask.shape())
+        if useSilhouette:
+            # filename_ref_data_silhouette=filename_ref_data
+            for i in range(256):
+                mask_element = mask.readline().split()
+                for j in range(256):
+                    # break
+                    filename_ref_data[i][j]=filename_ref_data[i][j]*float(mask_element[j])
+            imshow(filename_ref_data)
+            imsave('data/birdie3_silhouette.png', img_as_ubyte(filename_ref_data))
         image_ref = torch.from_numpy(filename_ref_data.astype('float32') / 255.).permute(2,0,1)[None, ::]
-        image_ref_2=imread("birdie2_silhouette_switch.png")
+        image_ref_flip=np.fliplr(filename_ref_data)
+        # image_ref_flip=imread("birdie2_silhouette_switch.png")
 
-        image_ref_2=torch.from_numpy(image_ref_2.astype('float32')/255.).permute(2,0,1)[None, ::]
+        image_ref_flip=torch.from_numpy(image_ref_flip.astype('float32')/255.).permute(2,0,1)[None, ::]
         self.register_buffer('image_ref', image_ref)
-        self.register_buffer("image_ref_2",image_ref_2)
+        self.register_buffer("image_ref_2",image_ref_flip)
 
         # setup renderer
         renderer = nr.Renderer(camera_mode='look_at')
@@ -122,7 +131,7 @@ class Model(nn.Module):
     def forward(self):
         self.renderer.eye = nr.get_points_from_angles(2.732, 0, np.random.uniform(0, 360))
         # self.renderer.eye=
-        self.renderer.eye = nr.get_points_from_angles(2.732, 180,0)
+        self.renderer.eye = nr.get_points_from_angles(2.732, 0,0)
         # image_ref = self.image_ref.detach().cpu().numpy()[0].transpose((1, 2, 0))
 
 
@@ -130,7 +139,7 @@ class Model(nn.Module):
         image, _, _ = self.renderer(self.vertices, self.faces, torch.tanh(self.textures))
         loss_one_side = torch.sum((image - self.image_ref) ** 2)
 
-        self.renderer.eye = nr.get_points_from_angles(2.732, 0,0)
+        self.renderer.eye = nr.get_points_from_angles(2.732, 180,0)
         image, _, _ = self.renderer(self.vertices, self.faces, torch.tanh(self.textures))
         loss_symmetric = torch.sum((image - self.image_ref_2) ** 2)
 
@@ -199,7 +208,7 @@ def main():
     parser.add_argument('-g', '--gpu', type=int, default=0)
     args = parser.parse_args()
 
-    model = Model(args.filename_obj, args.filename_ref)
+    model = Model(args.filename_obj, args.filename_ref,useSilhouette=False,useDeltaAndScale=True)
     model.cuda()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=0.1, betas=(0.5,0.999))
@@ -213,73 +222,45 @@ def main():
 
     # draw object
     # loop = tqdm.tqdm(range(0, 360, 4))
+    # print(nr.get_points_from_angles(2.732,180,0))
+    #這竟然不是求座標系的輸出，但看起來輸入是求座標系，而得到的結果也是求座標系。
+    #好奇特，
     model.renderer.eye = nr.get_points_from_angles(2.732, 180, 0)
-
+    # print(nr.get_points_from_angles(2.732,0,0))
     images, _, _ = model.renderer(model.vertices, model.faces, torch.tanh(model.textures))
     image = images.detach().cpu().numpy()[0].transpose((1, 2, 0))
     imsave('data/outputs.png', img_as_ubyte(image))
-
+    # exit()
     #---------------------------test for read texture
     texture_vertices,texture_faces=load_obj_get_texture_vertices_and_face(args.filename_obj)
     texture_vertices=texture_vertices[None, :, :]
     texture_faces=texture_faces[None, :, :]
-    for i in range(len(texture_vertices[0])):
-        texture_vertices[0][i][0]*=2
-        texture_vertices[0][i][1]*=2
-
-    for i in range(len(texture_vertices[0])):
-        texture_vertices[0][i][0]-=1
-        texture_vertices[0][i][1]-=1
-
-    # texture_vertices=texture_vertices*1.5
-    # temp_x=0.0
-    # temp_y=0.0
-    # min_x=1.0
-    # min_y=1.0
-    #
-    # print(texture_vertices.size())
     # for i in range(len(texture_vertices[0])):
-    #     if(temp_x<texture_vertices[0][i][0]):
-    #         temp_x=texture_vertices[0][i][0]
-    #     if(temp_y<texture_vertices[0][i][1]):
-    #         temp_y=texture_vertices[0][i][1]
-    #     if(min_x>texture_vertices[0][i][0]):
-    #         min_x=texture_vertices[0][i][0]
-    #     if(min_y>texture_vertices[0][i][1]):
-    #         min_y=texture_vertices[0][i][1]
-    # print(temp_x)
-    # print(temp_y)
-    # print(min_x)
-    # print(min_y)
+    #     texture_vertices[0][i][0]*=2
+    #     texture_vertices[0][i][1]*=2
+    # for i in range(len(texture_vertices[0])):
+    #     texture_vertices[0][i][0]-=1
+    #     texture_vertices[0][i][1]-=1
+    #--------------------------------------
+
+
+    # model.renderer.eye =[0.5,0.5,-(3**0.5)]
+    print(nr.get_points_from_angles(2.732, 0, 0))
     # exit()
-    model.renderer.eye = nr.get_points_from_angles(2.732, 0, 0)
+    print(model.renderer.camera_direction)
+    model.renderer.eye=nr.get_points_from_angles(2.732,0,180)
     images, _, _ = model.renderer(texture_vertices, texture_faces, torch.tanh(model.textures))
     image = images.detach().cpu().numpy()[0].transpose((1, 2, 0))
-    #-----test white texture png
-    #-----
-    # for i in range(len(image)):
-    #     for j in range(len(image[i])):
-    #         if(image[i][j][0]==0.0 and image[i][j][1]==0.0 and image[i][j][2]==0.0):
-    #             image[i][j][0]=1.0
-    #             image[i][j][1]=1.0
-    #             image[i][j][2]=1.0
-    # exit()
+
+
     imsave('data/texture.png', img_as_ubyte(image))
     imshow(img_as_ubyte(image))
     plt.show()
-
+    #----------------------------------------------
     # exit()
     for num, azimuth in enumerate(loop):
         loop.set_description('Drawing')
         model.renderer.eye = nr.get_points_from_angles(2.732, 0, azimuth)
-
-        # model.textures = torch.zeros(1, self.faces.shape[1], texture_size, texture_size, texture_size, 3, dtype=torch.float32)
-        # model.textures=torch.rand(1,555,6,6,6,3,dtype=torch.float32)
-        # textures = torch.zeros(1, 555, 4, 4, 4, 3, dtype=torch.float32)
-        # model.textures = nn.Parameter(textures)
-
-
-
         images, _, _ = model.renderer(model.vertices, model.faces, torch.tanh(model.textures))
         image = images.detach().cpu().numpy()[0].transpose((1, 2, 0))
         imsave('/tmp/_tmp_%04d.png' % num, img_as_ubyte(image))
