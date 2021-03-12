@@ -232,6 +232,11 @@ def main():
     imsave('data/outputs.png', img_as_ubyte(image))
     # exit()
     #---------------------------test for read texture
+    renderer_texture=nr.Renderer(image_size=512,camera_mode="look")
+    renderer_texture.perspective = True
+    renderer_texture.background_color=[1,1,1]
+    renderer_texture.light_intensity_directional = 0.0
+    renderer_texture.light_intensity_ambient = 1.0
     texture_vertices,texture_faces=load_obj_get_texture_vertices_and_face(args.filename_obj)
     texture_vertices=texture_vertices[None, :, :]
     texture_faces=texture_faces[None, :, :]
@@ -245,16 +250,18 @@ def main():
 
 
     # model.renderer.eye =[0.5,0.5,-(3**0.5)]
-    print(nr.get_points_from_angles(2.732, 0, 0))
+    # print(nr.get_points_from_angles(2.732, 0, 0))
     # exit()
-    print(model.renderer.camera_direction)
-    model.renderer.eye=nr.get_points_from_angles(2.732,0,180)
-    images, _, _ = model.renderer(texture_vertices, texture_faces, torch.tanh(model.textures))
-    image = images.detach().cpu().numpy()[0].transpose((1, 2, 0))
+    # print(model.renderer.camera_direction)
+    renderer_texture.camera_direction=[0,0,1]
+    renderer_texture.eye=[0.5,0.5,-1*(3**0.5)/2]
+    images, _, _ = renderer_texture(texture_vertices, texture_faces, torch.tanh(model.textures))
+    uv_image = images.detach().cpu().numpy()[0].transpose((1, 2, 0))
 
 
-    imsave('data/texture.png', img_as_ubyte(image))
-    imshow(img_as_ubyte(image))
+    imsave('data/texture.png', img_as_ubyte(uv_image))
+    imshow(img_as_ubyte(uv_image))
+    imsave('data/outputs.png', img_as_ubyte(uv_image))
     plt.show()
     #----------------------------------------------
     # exit()
