@@ -34,7 +34,7 @@ class Model(nn.Module):
         #目前先嘗試把delta v 拿掉，原因是，blender產生出來的vertices順序會打亂。
 
         if useDeltaAndScale:
-            delta_v_read = open("bird1_delta_v.txt", "r")
+            delta_v_read = open("bird2_delta_v.txt", "r")
             for i in range(len(vertices)):
                 # continue
                 vector=delta_v_read.readline().split()
@@ -95,11 +95,11 @@ class Model(nn.Module):
         # create textures
         # texture size=1的時候每個三角形都各自有一個顏色
         #texture size=2的時候就很神奇了，三角形像是有內插的顏色一樣，這一點我不太理解
-        texture_size = 4
+        texture_size = 6
         textures = torch.zeros(1, self.faces.shape[1], texture_size, texture_size, texture_size, 3, dtype=torch.float32)
         self.textures = nn.Parameter(textures)
         #silhouette-----------------------
-        mask = open("bird1_mask.txt", "r")
+        mask = open("bird2_mask.txt", "r")
         filename_ref_data=imread(filename_ref)
         #---------------------這邊的問題是強置只能讀取256*256的圖片來製作前景去被
         # print(mask.shape())
@@ -111,7 +111,7 @@ class Model(nn.Module):
                     # break
                     filename_ref_data[i][j]=filename_ref_data[i][j]*float(mask_element[j])
             imshow(filename_ref_data)
-            imsave('data/birdie3_silhouette.png', img_as_ubyte(filename_ref_data))
+            imsave('data/birdie2_silhouette.png', img_as_ubyte(filename_ref_data))
         image_ref = torch.from_numpy(filename_ref_data.astype('float32') / 255.).permute(2,0,1)[None, ::]
         image_ref_flip=np.fliplr(filename_ref_data)
         # image_ref_flip=imread("birdie2_silhouette_switch.png")
@@ -131,7 +131,7 @@ class Model(nn.Module):
     def forward(self):
         self.renderer.eye = nr.get_points_from_angles(2.732, 0, np.random.uniform(0, 360))
         # self.renderer.eye=
-        self.renderer.eye = nr.get_points_from_angles(2.732, 0,0)
+        self.renderer.eye = nr.get_points_from_angles(2.732, 180,0)
         # image_ref = self.image_ref.detach().cpu().numpy()[0].transpose((1, 2, 0))
 
 
@@ -139,7 +139,7 @@ class Model(nn.Module):
         image, _, _ = self.renderer(self.vertices, self.faces, torch.tanh(self.textures))
         loss_one_side = torch.sum((image - self.image_ref) ** 2)
 
-        self.renderer.eye = nr.get_points_from_angles(2.732, 180,0)
+        self.renderer.eye = nr.get_points_from_angles(2.732, 0,0)
         image, _, _ = self.renderer(self.vertices, self.faces, torch.tanh(self.textures))
         loss_symmetric = torch.sum((image - self.image_ref_2) ** 2)
 
@@ -212,7 +212,7 @@ def main():
     model.cuda()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=0.1, betas=(0.5,0.999))
-    loop = tqdm.tqdm(range(300))
+    loop = tqdm.tqdm(range(1000))
     for _ in loop:
         loop.set_description('Optimizing')
         optimizer.zero_grad()
@@ -232,7 +232,7 @@ def main():
     imsave('data/outputs.png', img_as_ubyte(image))
     # exit()
     #---------------------------test for read texture
-    renderer_texture=nr.Renderer(image_size=512,camera_mode="look")
+    renderer_texture=nr.Renderer(image_size=256,camera_mode="look")
     renderer_texture.perspective = True
     renderer_texture.background_color=[1,1,1]
     renderer_texture.light_intensity_directional = 0.0
@@ -261,10 +261,8 @@ def main():
 
     imsave('data/texture.png', img_as_ubyte(uv_image))
     imshow(img_as_ubyte(uv_image))
-    imsave('data/outputs.png', img_as_ubyte(uv_image))
     plt.show()
     #----------------------------------------------
-    # exit()
     for num, azimuth in enumerate(loop):
         loop.set_description('Drawing')
         model.renderer.eye = nr.get_points_from_angles(2.732, 0, azimuth)
