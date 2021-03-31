@@ -17,15 +17,51 @@ import math
 
 import neural_renderer as nr
 from matplotlib import pyplot as plt
+# from .load_texture_by_obj import load_texture_by_obj
 current_dir = os.path.dirname(os.path.realpath(__file__))
 data_dir = os.path.join(current_dir, 'data')
+def load_texture_by_obj(filename_obj, normalization=True, texture_size=4, load_texture=False,
+             texture_wrapping='REPEAT', use_bilinear=True):
+    """
+    Load Wavefront .obj file.
+    This function only supports vertices (v x x x) and faces (f x x x).
+    """
 
+    # load vertices
+    vertices = []
+    with open(filename_obj) as f:
+        lines = f.readlines()
+
+    for line in lines:
+        if len(line.split()) == 0:
+            continue
+        if line.split()[0] == 'vt':
+            vertices.append([float(v) for v in line.split()[1:4]])
+
+    for i in range(len(vertices)):
+        vertices[i].append(0.0)
+    vertices = torch.from_numpy(np.vstack(vertices).astype(np.float32)).cuda()
+
+    # load faces
+    faces = []
+    for line in lines:
+        if len(line.split()) == 0:
+            continue
+        if line.split()[0] == 'f':
+            vs = line.split()[1:]
+            nv = len(vs)
+            v0 = int(vs[0].split('/')[1])
+            for i in range(nv - 2):
+                v1 = int(vs[i + 1].split('/')[1])
+                v2 = int(vs[i + 2].split('/')[1])
+                faces.append((v0, v1, v2))
+    faces = torch.from_numpy(np.vstack(faces).astype(np.int32)).cuda() - 1
+
+    return vertices, faces
 class Model(nn.Module):
     def __init__(self, filename_obj, filename_ref,useSilhouette=False,useDeltaAndScale=True):
         super(Model, self).__init__()
         vertices, faces = nr.load_obj(filename_obj)
-        # print(faces[-1])
-        # exit()
         ##--------------------------
         # print(vertices)
 
@@ -35,13 +71,15 @@ class Model(nn.Module):
 
         if useDeltaAndScale:
             delta_v_read = open("bird2_delta_v.txt", "r")
+            # print(len(vertices))
+            # print(vertices.shape()[0])
             for i in range(len(vertices)):
                 # continue
+                # print(vertices[i])
                 vector=delta_v_read.readline().split()
                 vertices[i][0]=vertices[i][0]+float(vector[0])
                 vertices[i][1]=vertices[i][1]+float(vector[1])
                 vertices[i][2]=vertices[i][2]+float(vector[2])
-            # print(vertices.shape)
             ############
             ###########
 
@@ -60,7 +98,6 @@ class Model(nn.Module):
         #rotataion
         cos=math.cos(4*(math.pi)/3)
         sin=math.sin(4*(math.pi)/3)
-        # print(vertices[0])
         cos_2=math.cos(3*(math.pi)/2)
         sin_2=math.sin(3*(math.pi)/2)
         for i in range(len(vertices)):
@@ -81,6 +118,7 @@ class Model(nn.Module):
             vertices[i][2]=vertices_2
             #-----------------------
             #------------------
+            #---------------位移translation
             vertices[i][1]-=0.015
             vertices[i][0]-=0.18
 
@@ -154,48 +192,6 @@ def make_gif(filename):
             writer.append_data(imageio.imread(filename))
             os.remove(filename)
     writer.close()
-def load_obj_get_texture_vertices_and_face(filename_obj, normalization=True, texture_size=4, load_texture=False,
-             texture_wrapping='REPEAT', use_bilinear=True):
-    """
-    Load Wavefront .obj file.
-    This function only supports vertices (v x x x) and faces (f x x x).
-    """
-
-    # load vertices
-    vertices = []
-    with open(filename_obj) as f:
-        lines = f.readlines()
-
-    for line in lines:
-        if len(line.split()) == 0:
-            continue
-        if line.split()[0] == 'vt':
-            vertices.append([float(v) for v in line.split()[1:4]])
-
-    # print(len(vertices[0]))
-    for i in range(len(vertices)):
-        vertices[i].append(0.0)
-    # print(len(vertices[0]))
-    vertices = torch.from_numpy(np.vstack(vertices).astype(np.float32)).cuda()
-
-    # load faces
-    faces = []
-    for line in lines:
-        if len(line.split()) == 0:
-            continue
-        if line.split()[0] == 'f':
-            vs = line.split()[1:]
-            nv = len(vs)
-            v0 = int(vs[0].split('/')[1])
-            for i in range(nv - 2):
-                v1 = int(vs[i + 1].split('/')[1])
-                v2 = int(vs[i + 2].split('/')[1])
-                faces.append((v0, v1, v2))
-    faces = torch.from_numpy(np.vstack(faces).astype(np.int32)).cuda() - 1
-
-    # print(faces[0])
-    return vertices, faces
-
 
 
 def main():
@@ -208,11 +204,11 @@ def main():
     parser.add_argument('-g', '--gpu', type=int, default=0)
     args = parser.parse_args()
 
-    model = Model(args.filename_obj, args.filename_ref,useSilhouette=False,useDeltaAndScale=True)
+    model = Model(args.filename_obj, args.filename_ref,useSilhouette=True,useDeltaAndScale=True)
     model.cuda()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=0.1, betas=(0.5,0.999))
-    loop = tqdm.tqdm(range(1000))
+    loop = tqdm.tqdm(range(300))
     for _ in loop:
         loop.set_description('Optimizing')
         optimizer.zero_grad()
@@ -237,22 +233,25 @@ def main():
     renderer_texture.background_color=[1,1,1]
     renderer_texture.light_intensity_directional = 0.0
     renderer_texture.light_intensity_ambient = 1.0
-    texture_vertices,texture_faces=load_obj_get_texture_vertices_and_face(args.filename_obj)
+    texture_vertices,texture_faces=load_texture_by_obj(args.filename_obj)
     texture_vertices=texture_vertices[None, :, :]
     texture_faces=texture_faces[None, :, :]
-    # for i in range(len(texture_vertices[0])):
-    #     texture_vertices[0][i][0]*=2
-    #     texture_vertices[0][i][1]*=2
-    # for i in range(len(texture_vertices[0])):
-    #     texture_vertices[0][i][0]-=1
-    #     texture_vertices[0][i][1]-=1
-    #--------------------------------------
-
-
-    # model.renderer.eye =[0.5,0.5,-(3**0.5)]
-    # print(nr.get_points_from_angles(2.732, 0, 0))
+    texture_data=open("texture_data.txt","w")
+    print(model.textures.shape)
     # exit()
-    # print(model.renderer.camera_direction)
+    for face_num in(range(model.textures.shape[1])):
+        for i in range(model.textures.shape[2]):
+            for j in range(model.textures.shape[3]):
+                for k in range(model.textures.shape[4]):
+                    for color in range(3):
+                        texture_data.write(str(model.textures[0][face_num][i][j][k][color].detach().cpu().numpy()))
+                        if(color<2):
+                            texture_data.write(" ")
+                        else:
+                            texture_data.write("\n")
+    # print(model.textures[0])
+    texture_data.close()
+    # exit()
     renderer_texture.camera_direction=[0,0,1]
     renderer_texture.eye=[0.5,0.5,-1*(3**0.5)/2]
     images, _, _ = renderer_texture(texture_vertices, texture_faces, torch.tanh(model.textures))
