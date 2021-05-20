@@ -57,8 +57,8 @@ def load_texture_by_obj(filename_obj, normalization=True, texture_size=4, load_t
     return vertices, faces
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-io', '--filename_obj', type=str, default=os.path.join(data_dir, 'teapot.obj'))
-    parser.add_argument('-ir', '--filename_ref', type=str, default=os.path.join(data_dir, 'example3_ref.png'))
+    parser.add_argument('-io', '--filename_obj', type=str, default=os.path.join('BirdReOrined_UnwrapBlender.obj'))
+    parser.add_argument('-ir', '--filename_ref', type=str, default=os.path.join(data_dir, 'birdie2.png'))
 
 
     parser.add_argument('-or', '--filename_output', type=str, default=os.path.join(data_dir, 'example_result.gif'))
